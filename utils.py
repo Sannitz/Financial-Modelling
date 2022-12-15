@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
 
-API_KEY = '' # API Keys for EOD data. Please contact the team if necessary
+API_KEY = '5e6b41389b9ab8.33631133' # API Keys for EOD data. Please contact the team if necessary
 client = EodHistoricalData(API_KEY)
 
 
@@ -87,7 +87,7 @@ def plot_asset_returns(df: pd.DataFrame):
     _, ax = plt.subplots(figsize=(15,7), facecolor='white')
     c_ret -= 1 
     
-    c_ret.columns = ['Portfolio', 'CH Bond', 'DBC', 'IT Bond', 'SHEL', 'SMI', 'WMI', 'Risk Free']
+    c_ret.columns = ['Portfolio', 'CH Bond', 'DBC', 'IT Bond', 'SHEL', 'SMI', 'WMT', 'Risk Free']
         
     for column in c_ret.drop('Portfolio', axis=1):
         ax.plot(c_ret[column], marker='', linewidth=1, alpha=0.6, label=column)
@@ -112,14 +112,21 @@ def plot_asset_returns(df: pd.DataFrame):
     ax.set_ylabel('Return')
     # plt.show()
 
-def get_ir(df: pd.DataFrame, becnhmark: str = 'AOK', weekly=True):
+def get_ir(df: pd.DataFrame, benchmark: str = 'AOK', weekly=False):
     out = df.copy()
-    tmp = pd.DataFrame(client.get_prices_eod(becnhmark, period='d', order='a', from_=str(df.index[0])))
+    tmp = pd.DataFrame(client.get_prices_eod(benchmark, period='d', order='a', from_='2015-01-01'))
     tmp.set_index(pd.to_datetime(tmp.date), inplace=True)
     if weekly: tmp = tmp.resample('1w').last()
-    out[becnhmark] = tmp.adjusted_close.pct_change()
+    out[benchmark] = tmp.adjusted_close.pct_change().dropna()
     ret = out.ewm(span=252*5).mean().iloc[-1]
-    return (ret.Portfolio - ret.AOK)*252 / (out.Portfolio - out.AOK).std() * np.sqrt(252)
+
+    ann_port = (1+ret.Portfolio)**252 - 1
+    ann_bench = (1+ret[benchmark])**252 - 1
+
+    ir = (out.Portfolio - out[benchmark]).std() * np.sqrt(252)
+    print((ann_port - ann_bench), ann_port, ann_bench)
+    print((ret.Portfolio - ret[benchmark])*252, ret.Portfolio, ret[benchmark])
+    return (ann_port - ann_bench) / ir, ir
 
 def calculate_sharpe(returns: float, std: float, risk_fee: float = 0.04557, periods: int = 1):
     num = returns - risk_fee / 252 * periods
@@ -131,16 +138,16 @@ def calculate_sortino(returns: pd.DataFrame, risk_fee: float = 0.04557, periods:
     denom = returns[returns < 0].std() * np.sqrt(periods)
     return num / denom
 
-def get_treynor(returns: pd.DataFrame, risk_free: float = 0.04557, period = False):
-    beta = calculate_beta(returns)
+def get_treynor(returns: pd.DataFrame, risk_free: float = 0.04557, period = False, benchmark: str = 'AOK'):
+    beta = calculate_beta(returns, benchmark)
     if period: return ((returns.Portfolio[-1] - 1 - risk_free/252)*len(returns.index)) / beta
-    else: return (returns.mean() - risk_free/252) / beta
+    else: return (returns.mean()*252 - risk_free) / beta
 
 
 def portfolio_return(start: str, end: str, returns: pd.DataFrame, risk_free: float = 0.04557, benchmark: str = 'AOK',  plot: bool =True) -> dict:
     # names = ['Portfolio', 'Risky Portfolio', 'DBC.US', 'SHEL', 'CSSMI.SW', 'WMT', 'EUR', 'CHF']
     df = returns[start:end] #[names]
-    n = len(returns.index)
+    n = len(df.index)
     c_ret = (1+df).cumprod()
     c_ret.iloc[0] = 1.0
     
@@ -169,6 +176,7 @@ def portfolio_return(start: str, end: str, returns: pd.DataFrame, risk_free: flo
     daily_std = df.Portfolio.std()
     exp_std = risk_models.exp_cov(df.Portfolio, span=252*5, returns_data=True).loc['Portfolio', 'Portfolio']
 
+
     out = {}
     out['start'] = c_ret.index[0]
     out['end'] = c_ret.index[-1]
@@ -183,10 +191,13 @@ def portfolio_return(start: str, end: str, returns: pd.DataFrame, risk_free: flo
     out['Period Sharpe (Ex-Post)'] = round(calculate_sharpe(exp_return, daily_std, periods=n), 4)
     out['Period Sharpe (Ex-Ante)'] = round(calculate_sharpe(daily_return, daily_std, periods=n), 4)
     out['Period Sharpe'] = round(((c_ret.Portfolio[-1] - 1) - risk_free/252*n) / (df.Portfolio.std() * np.sqrt(n)), 4)
+    out['Period Sharpe Ann'] = round(((c_ret.Portfolio[-1]**(252/n) - 1) - risk_free) / (df.Portfolio.std() * np.sqrt(252)), 4)
     out['Daily Sortino'] = round((df.Portfolio.mean() - risk_free/252) / df[df.Portfolio < 0].Portfolio.std(), 4)
     out['Period Sortino'] = round(((c_ret.Portfolio[-1] - 1) - risk_free/252*n) / (df[df.Portfolio < 0].Portfolio.std() * np.sqrt(n)), 4)
-    out['Daily Treynor (AOK)'] = round(get_treynor(df[['Portfolio']]).Portfolio, 4)
-    out['Information Ratio (AOK)'] = round(get_ir(df[['Portfolio']]), 4)
+    out['Daily Treynor (AOK)'] = round(get_treynor(df[['Portfolio']], benchmark='SHY').Portfolio, 4)
+    ir, te = get_ir(df[['Portfolio']])
+    out['Information Ratio (AOK)'] = round(ir, 4)
+    out['Tracking Error (AOK)'] = round(te, 4)
     out['Max. Drawdown'] = round(max_drawdown*100, 4)
 
     return out
