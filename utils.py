@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
 
-API_KEY = '5e6b41389b9ab8.33631133' # API Keys for EOD data. Please contact the team if necessary
+API_KEY = '' # API Keys for EOD data. Please contact the team if necessary
 client = EodHistoricalData(API_KEY)
 
 
